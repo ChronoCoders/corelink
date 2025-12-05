@@ -76,6 +76,7 @@ pub struct CoreLinkHandler {
     events: VecDeque<CoreLinkHandlerEvent>,
     dial_upgrade_failures: u32,
     listen_upgrade_failures: u32,
+    can_request_outbound: bool,
 }
 
 impl CoreLinkHandler {
@@ -90,6 +91,7 @@ impl CoreLinkHandler {
             events: VecDeque::new(),
             dial_upgrade_failures: 0,
             listen_upgrade_failures: 0,
+            can_request_outbound: false,
         }
     }
 }
@@ -159,7 +161,7 @@ impl ConnectionHandler for CoreLinkHandler {
         // Handle outbound writing
         match &mut self.outbound_state {
             StreamState::Idle => {
-                if !self.pending_messages.is_empty() {
+                if !self.pending_messages.is_empty() && self.can_request_outbound {
                     if self.outbound_stream.is_none() {
                         info!("🔴 Requesting outbound substream");
                         return Poll::Ready(ConnectionHandlerEvent::OutboundSubstreamRequest {
@@ -212,10 +214,14 @@ impl ConnectionHandler for CoreLinkHandler {
             ConnectionEvent::FullyNegotiatedInbound(stream) => {
                 info!("🔵 Inbound stream fully negotiated");
                 self.inbound_stream = Some(stream.protocol);
+                // Allow outbound requests after inbound is established
+                self.can_request_outbound = true;
             }
             ConnectionEvent::FullyNegotiatedOutbound(stream) => {
                 info!("🔴 Outbound stream fully negotiated");
                 self.outbound_stream = Some(stream.protocol);
+                // Allow future outbound requests after one succeeds
+                self.can_request_outbound = true;
             }
             ConnectionEvent::DialUpgradeError(err) => {
                 self.dial_upgrade_failures += 1;
@@ -223,6 +229,15 @@ impl ConnectionHandler for CoreLinkHandler {
                     info!("🔴 Dial upgrade failed (attempt {}): {:?}", self.dial_upgrade_failures, err.error);
                 } else {
                     debug!("Dial upgrade failed (attempt {}): {:?}", self.dial_upgrade_failures, err.error);
+                }
+
+                // After 3 failures, stop trying and clear pending messages
+                if self.dial_upgrade_failures >= 3 {
+                    if !self.pending_messages.is_empty() {
+                        debug!("Clearing {} pending messages due to repeated failures", self.pending_messages.len());
+                        self.pending_messages.clear();
+                    }
+                    self.can_request_outbound = false;
                 }
             }
             ConnectionEvent::ListenUpgradeError(err) => {
