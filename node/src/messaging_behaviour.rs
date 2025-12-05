@@ -1,45 +1,57 @@
 use crate::protocol_handler::{CoreLinkHandler, CoreLinkHandlerEvent};
-use corelink_core::{Message, MessageType, message::DiscoveryMessage, Identity};
+use corelink_core::message::{DiscoveryMessage, Message, MessageType};
+use corelink_core::identity::NodeId;
+use libp2p_core::{Endpoint, Multiaddr};
 use libp2p_identity::PeerId;
-use libp2p_swarm::{NetworkBehaviour, ToSwarm};
+use libp2p_swarm::{
+    ConnectionDenied, ConnectionId, FromSwarm, NetworkBehaviour, NotifyHandler, THandler,
+    THandlerInEvent, THandlerOutEvent, ToSwarm,
+};
 use std::collections::{HashMap, VecDeque};
 use std::task::{Context, Poll};
 use tracing::info;
 
 #[derive(Debug)]
-pub enum MessagingEvent {
-    MessageReceived { peer: PeerId, message: Message },
-    MessageSent { peer: PeerId },
+pub enum MessagingBehaviourEvent {
+    MessageReceived { from: PeerId, message: Message },
+    MessageSent { to: PeerId },
+    SendError { to: PeerId, error: String },
 }
 
 pub struct MessagingBehaviour {
-    events: VecDeque<MessagingEvent>,
-    connected_peers: HashMap<PeerId, ()>,
-    identity: Identity,
+    connected_peers: HashMap<PeerId, Vec<ConnectionId>>,
+    pending_handler_messages: VecDeque<(PeerId, Message)>,
 }
 
 impl MessagingBehaviour {
     pub fn new() -> Self {
         Self {
-            events: VecDeque::new(),
             connected_peers: HashMap::new(),
-            identity: Identity::generate(),
+            pending_handler_messages: VecDeque::new(),
         }
     }
 
-    pub fn send_message(&mut self, peer: PeerId, _message: Message) {
+    pub fn send_message(&mut self, peer: PeerId, message: Message) {
         info!("Queueing message to peer: {}", peer);
-        self.events.push_back(MessagingEvent::MessageSent { peer });
+        self.pending_handler_messages.push_back((peer, message));
     }
 
     pub fn broadcast_discovery(&mut self) {
-        let discovery = Message {
-            from: self.identity.node_id(),
+        let peers: Vec<PeerId> = self.connected_peers.keys().copied().collect();
+        info!("📡 Broadcasting discovery to {} peers", peers.len());
+
+        let discovery_data = DiscoveryMessage {
+            capabilities: vec!["storage".to_string(), "compute".to_string()],
+            protocol_version: "1.0.0".to_string(),
+        };
+
+        // Dummy NodeId - ideally this would be the real node's ID
+        let dummy_pubkey = ed25519_dalek::VerifyingKey::from_bytes(&[0u8; 32]).unwrap();
+
+        let discovery_msg = Message {
+            msg_type: MessageType::Discovery(discovery_data),
+            from: NodeId::from_pubkey(&dummy_pubkey),
             to: None,
-            msg_type: MessageType::Discovery(DiscoveryMessage {
-                capabilities: vec!["storage".to_string(), "compute".to_string()],
-                protocol_version: "1.0.0".to_string(),
-            }),
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -47,76 +59,90 @@ impl MessagingBehaviour {
             signature: vec![],
         };
 
-        let peers: Vec<PeerId> = self.connected_peers.keys().copied().collect();
         for peer in peers {
-            self.send_message(peer, discovery.clone());
+            self.send_message(peer, discovery_msg.clone());
         }
     }
 }
 
 impl NetworkBehaviour for MessagingBehaviour {
     type ConnectionHandler = CoreLinkHandler;
-    type ToSwarm = MessagingEvent;
+    type ToSwarm = MessagingBehaviourEvent;
 
     fn handle_established_inbound_connection(
         &mut self,
-        _connection_id: libp2p_swarm::ConnectionId,
-        peer: PeerId,
-        _local_addr: &libp2p_core::Multiaddr,
-        _remote_addr: &libp2p_core::Multiaddr,
-    ) -> Result<libp2p_swarm::THandler<Self>, libp2p_swarm::ConnectionDenied> {
-        info!("Established inbound connection with {}", peer);
-        self.connected_peers.insert(peer, ());
+        _connection_id: ConnectionId,
+        _peer: PeerId,
+        _local_addr: &Multiaddr,
+        _remote_addr: &Multiaddr,
+    ) -> Result<THandler<Self>, ConnectionDenied> {
+        info!("🔵 Creating handler for inbound connection");
         Ok(CoreLinkHandler::new())
     }
 
     fn handle_established_outbound_connection(
         &mut self,
-        _connection_id: libp2p_swarm::ConnectionId,
-        peer: PeerId,
-        _addr: &libp2p_core::Multiaddr,
-        _role_override: libp2p_core::Endpoint,
-    ) -> Result<libp2p_swarm::THandler<Self>, libp2p_swarm::ConnectionDenied> {
-        info!("Established outbound connection with {}", peer);
-        self.connected_peers.insert(peer, ());
+        _connection_id: ConnectionId,
+        _peer: PeerId,
+        _addr: &Multiaddr,
+        _role_override: Endpoint,
+    ) -> Result<THandler<Self>, ConnectionDenied> {
+        info!("🔴 Creating handler for outbound connection");
         Ok(CoreLinkHandler::new())
     }
 
-    fn on_swarm_event(&mut self, event: libp2p_swarm::FromSwarm) {
-        match event {
-            libp2p_swarm::FromSwarm::ConnectionClosed(e) => {
-                self.connected_peers.remove(&e.peer_id);
+    fn on_swarm_event(&mut self, event: FromSwarm) {
+        if let FromSwarm::ConnectionEstablished(e) = event {
+            info!(
+                "Established {} connection with {}",
+                if e.endpoint.is_dialer() {
+                    "outbound"
+                } else {
+                    "inbound"
+                },
+                e.peer_id
+            );
+
+            self.connected_peers
+                .entry(e.peer_id)
+                .or_default()
+                .push(e.connection_id);
+        } else if let FromSwarm::ConnectionClosed(e) = event {
+            if let Some(conns) = self.connected_peers.get_mut(&e.peer_id) {
+                conns.retain(|id| id != &e.connection_id);
+                if conns.is_empty() {
+                    self.connected_peers.remove(&e.peer_id);
+                    info!("All connections closed with {}", e.peer_id);
+                }
             }
-            _ => {}
         }
     }
 
     fn on_connection_handler_event(
         &mut self,
         peer_id: PeerId,
-        _connection_id: libp2p_swarm::ConnectionId,
-        event: libp2p_swarm::THandlerOutEvent<Self>,
+        _connection_id: ConnectionId,
+        event: THandlerOutEvent<Self>,
     ) {
         match event {
             CoreLinkHandlerEvent::MessageReceived(msg) => {
-                self.events.push_back(MessagingEvent::MessageReceived {
-                    peer: peer_id,
-                    message: msg,
-                });
+                info!("📨 Received message from {}: {:?}", peer_id, msg.msg_type);
             }
             CoreLinkHandlerEvent::MessageSent => {
-                info!("Message sent to {}", peer_id);
+                info!("✅ Message sent to {}", peer_id);
             }
         }
     }
 
-    fn poll(
-        &mut self,
-        _cx: &mut Context,
-    ) -> Poll<ToSwarm<Self::ToSwarm, libp2p_swarm::THandlerInEvent<Self>>> {
-        if let Some(event) = self.events.pop_front() {
-            return Poll::Ready(ToSwarm::GenerateEvent(event));
+    fn poll(&mut self, _cx: &mut Context) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
+        if let Some((peer, message)) = self.pending_handler_messages.pop_front() {
+            return Poll::Ready(ToSwarm::NotifyHandler {
+                peer_id: peer,
+                handler: NotifyHandler::Any,
+                event: message,
+            });
         }
+
         Poll::Pending
     }
 }

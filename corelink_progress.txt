@@ -1,0 +1,21 @@
+CoreLink Development Progress
+=============================
+
+✅ Phase 1: Network Foundation (COMPLETED)
+- Mesh Network
+- Peer Discovery (mDNS)
+- Peer Connection
+- Keep-Alive (Ping)
+
+⏳ Phase 2: Custom Messaging (IN PROGRESS)
+- Protocol Handler ✅
+- Message Behaviour ✅
+- Actual Message Send/Receive ⬜
+
+⬜ Phase 3: File Sharing
+⬜ Phase 4: Web Dashboard (Leptos)
+⬜ Phase 5: Distributed Storage
+⬜ Phase 6: PoPI Consensus
+
+Current Status: Building custom stream-based messaging system
+Next Step: Implement actual message transmission over streams
