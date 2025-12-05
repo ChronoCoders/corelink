@@ -67,7 +67,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 messaging: MessagingBehaviour::new(),
             })
         })?
-        .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
+        .with_swarm_config(|c| {
+            c.with_idle_connection_timeout(Duration::from_secs(60))
+                .with_per_connection_event_buffer_size(64)
+        })
         .build();
 
     // Listen on all interfaces

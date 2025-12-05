@@ -9,7 +9,7 @@ use std::collections::VecDeque;
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 #[derive(Debug, Clone)]
 pub struct CoreLinkProtocol;
@@ -74,6 +74,8 @@ pub struct CoreLinkHandler {
     outbound_state: StreamState,
     pending_messages: VecDeque<Message>,
     events: VecDeque<CoreLinkHandlerEvent>,
+    dial_upgrade_failures: u32,
+    listen_upgrade_failures: u32,
 }
 
 impl CoreLinkHandler {
@@ -86,6 +88,8 @@ impl CoreLinkHandler {
             outbound_state: StreamState::Idle,
             pending_messages: VecDeque::new(),
             events: VecDeque::new(),
+            dial_upgrade_failures: 0,
+            listen_upgrade_failures: 0,
         }
     }
 }
@@ -214,10 +218,20 @@ impl ConnectionHandler for CoreLinkHandler {
                 self.outbound_stream = Some(stream.protocol);
             }
             ConnectionEvent::DialUpgradeError(err) => {
-                warn!("⚠️ Dial upgrade error: {:?}", err);
+                self.dial_upgrade_failures += 1;
+                if self.dial_upgrade_failures <= 2 {
+                    info!("🔴 Dial upgrade failed (attempt {}): {:?}", self.dial_upgrade_failures, err.error);
+                } else {
+                    debug!("Dial upgrade failed (attempt {}): {:?}", self.dial_upgrade_failures, err.error);
+                }
             }
             ConnectionEvent::ListenUpgradeError(err) => {
-                warn!("⚠️ Listen upgrade error: {:?}", err);
+                self.listen_upgrade_failures += 1;
+                if self.listen_upgrade_failures <= 2 {
+                    info!("🔵 Listen upgrade failed (attempt {}): {:?}", self.listen_upgrade_failures, err.error);
+                } else {
+                    debug!("Listen upgrade failed (attempt {}): {:?}", self.listen_upgrade_failures, err.error);
+                }
             }
             _ => {}
         }
