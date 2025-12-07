@@ -1,4 +1,4 @@
-use crate::{NodeId, FileMetadata, FileChunk};
+use crate::{FileChunk, FileMetadata, NodeId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
