@@ -92,7 +92,7 @@ impl CoreLinkHandler {
             events: VecDeque::new(),
             dial_upgrade_failures: 0,
             listen_upgrade_failures: 0,
-            can_request_outbound: true,  // Start enabled to allow initial requests
+            can_request_outbound: true, // Start enabled to allow initial requests
             outbound_requested: false,
         }
     }
@@ -193,7 +193,8 @@ impl ConnectionHandler for CoreLinkHandler {
                 }
                 Poll::Ready(Err(e)) => {
                     error!("❌ Failed to send message: {}", e);
-                    self.events.push_back(CoreLinkHandlerEvent::SendError(e.to_string()));
+                    self.events
+                        .push_back(CoreLinkHandlerEvent::SendError(e.to_string()));
                     self.outbound_state = StreamState::Idle;
                 }
                 Poll::Pending => {}
@@ -223,24 +224,33 @@ impl ConnectionHandler for CoreLinkHandler {
             ConnectionEvent::FullyNegotiatedOutbound(stream) => {
                 info!("🔴 Outbound stream fully negotiated");
                 self.outbound_stream = Some(stream.protocol);
-                self.outbound_requested = false;  // Reset flag - upgrade completed
-                // Allow future outbound requests after one succeeds
+                self.outbound_requested = false; // Reset flag - upgrade completed
+                                                 // Allow future outbound requests after one succeeds
                 self.can_request_outbound = true;
             }
             ConnectionEvent::DialUpgradeError(err) => {
                 self.dial_upgrade_failures += 1;
-                self.outbound_requested = false;  // Reset flag - can retry if allowed
+                self.outbound_requested = false; // Reset flag - can retry if allowed
 
                 if self.dial_upgrade_failures <= 2 {
-                    info!("🔴 Dial upgrade failed (attempt {}): {:?}", self.dial_upgrade_failures, err.error);
+                    info!(
+                        "🔴 Dial upgrade failed (attempt {}): {:?}",
+                        self.dial_upgrade_failures, err.error
+                    );
                 } else {
-                    debug!("Dial upgrade failed (attempt {}): {:?}", self.dial_upgrade_failures, err.error);
+                    debug!(
+                        "Dial upgrade failed (attempt {}): {:?}",
+                        self.dial_upgrade_failures, err.error
+                    );
                 }
 
                 // After 3 failures, stop trying and clear pending messages
                 if self.dial_upgrade_failures >= 3 {
                     if !self.pending_messages.is_empty() {
-                        debug!("Clearing {} pending messages due to repeated failures", self.pending_messages.len());
+                        debug!(
+                            "Clearing {} pending messages due to repeated failures",
+                            self.pending_messages.len()
+                        );
                         self.pending_messages.clear();
                     }
                     self.can_request_outbound = false;
@@ -249,9 +259,15 @@ impl ConnectionHandler for CoreLinkHandler {
             ConnectionEvent::ListenUpgradeError(err) => {
                 self.listen_upgrade_failures += 1;
                 if self.listen_upgrade_failures <= 2 {
-                    info!("🔵 Listen upgrade failed (attempt {}): {:?}", self.listen_upgrade_failures, err.error);
+                    info!(
+                        "🔵 Listen upgrade failed (attempt {}): {:?}",
+                        self.listen_upgrade_failures, err.error
+                    );
                 } else {
-                    debug!("Listen upgrade failed (attempt {}): {:?}", self.listen_upgrade_failures, err.error);
+                    debug!(
+                        "Listen upgrade failed (attempt {}): {:?}",
+                        self.listen_upgrade_failures, err.error
+                    );
                 }
             }
             _ => {}

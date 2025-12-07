@@ -7,7 +7,7 @@ pub mod network;
 pub mod protocol;
 pub mod storage;
 
-pub use file::{FileMetadata, FileChunk, FileTransfer};
+pub use file::{FileChunk, FileMetadata, FileTransfer};
 pub use identity::{Identity, NodeId};
 pub use message::{Message, MessageType};
 pub use network::{NetworkState, PeerInfo};
