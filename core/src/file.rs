@@ -181,7 +181,11 @@ pub fn split_file_to_chunks(
 }
 
 /// Assemble chunks into a complete file
-pub fn assemble_chunks(chunks: &[FileChunk], metadata: &FileMetadata, output: &Path) -> io::Result<()> {
+pub fn assemble_chunks(
+    chunks: &[FileChunk],
+    metadata: &FileMetadata,
+    output: &Path,
+) -> io::Result<()> {
     // Verify we have all chunks
     if chunks.len() != metadata.total_chunks as usize {
         return Err(io::Error::new(
@@ -270,10 +274,7 @@ pub fn write_chunk_to_file(
     let offset = chunk.chunk_index as u64 * metadata.chunk_size as u64;
 
     // Open file and seek to offset
-    let mut file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .open(output)?;
+    let mut file = OpenOptions::new().create(true).write(true).open(output)?;
 
     file.seek(SeekFrom::Start(offset))?;
     file.write_all(&chunk.data)?;
