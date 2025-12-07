@@ -225,7 +225,7 @@ impl ConnectionHandler for CoreLinkHandler {
                 info!("🔴 Outbound stream fully negotiated");
                 self.outbound_stream = Some(stream.protocol);
                 self.outbound_requested = false; // Reset flag - upgrade completed
-                                                 // Allow future outbound requests after one succeeds
+                // Allow future outbound requests after one succeeds
                 self.can_request_outbound = true;
             }
             ConnectionEvent::DialUpgradeError(err) => {
