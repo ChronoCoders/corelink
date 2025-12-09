@@ -1,6 +1,7 @@
 use corelink_core::file::{
     split_file_to_chunks, verify_chunk, write_chunk_to_file, FileChunk, FileMetadata, FileTransfer,
 };
+use libp2p_identity::PeerId;
 use lru::LruCache;
 use std::collections::HashMap;
 use std::fs;
@@ -20,7 +21,7 @@ pub struct FileTransferManager {
     active_uploads: HashMap<String, FileMetadata>,
     active_downloads: HashMap<String, FileTransfer>,
     chunk_cache: LruCache<(String, u32), Vec<u8>>,
-    storage_path: PathBuf,
+    pub storage_path: PathBuf,
 }
 
 impl FileTransferManager {
@@ -86,6 +87,47 @@ impl FileTransferManager {
         self.active_uploads.insert(file_id, metadata.clone());
 
         Ok(metadata)
+    }
+
+    /// Request a file for download
+    pub fn request_file(
+        &mut self,
+        metadata: FileMetadata,
+        output_path: PathBuf,
+        peer: PeerId,
+    ) -> io::Result<String> {
+        let file_id = metadata.file_id.clone();
+
+        // Check if already downloading
+        if self.active_downloads.contains_key(&file_id) {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("Already downloading file: {}", file_id),
+            ));
+        }
+
+        info!(
+            "📥 Requesting file: {} from peer {}",
+            metadata.name, peer
+        );
+
+        // Create FileTransfer to track progress
+        let mut transfer = FileTransfer::new(metadata.clone(), output_path.clone());
+        transfer.add_peer(peer);
+
+        // Pre-allocate file with correct size
+        if let Err(e) = fs::File::create(&output_path).and_then(|f| f.set_len(metadata.size)) {
+            warn!("Failed to pre-allocate download file: {}", e);
+        }
+
+        info!(
+            "📊 Download initialized: {} chunks to download",
+            transfer.missing_chunks.len()
+        );
+
+        self.active_downloads.insert(file_id.clone(), transfer);
+
+        Ok(file_id)
     }
 
     /// Handle a chunk request and return the chunk if available
@@ -226,6 +268,39 @@ impl FileTransferManager {
                 .collect()
         } else {
             Vec::new()
+        }
+    }
+
+    /// Get active downloads count
+    #[allow(dead_code)]
+    pub fn active_downloads_count(&self) -> usize {
+        self.active_downloads.len()
+    }
+
+    /// Get active uploads count
+    #[allow(dead_code)]
+    pub fn active_uploads_count(&self) -> usize {
+        self.active_uploads.len()
+    }
+
+    /// Cancel a download
+    #[allow(dead_code)]
+    pub fn cancel_download(&mut self, file_id: &str) -> io::Result<()> {
+        if let Some(transfer) = self.active_downloads.remove(file_id) {
+            info!("🚫 Cancelled download: {}", file_id);
+
+            // Optionally delete partial file
+            if transfer.output_path.exists() {
+                fs::remove_file(&transfer.output_path)?;
+                debug!("Deleted partial download file: {:?}", transfer.output_path);
+            }
+
+            Ok(())
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("No active download: {}", file_id),
+            ))
         }
     }
 }

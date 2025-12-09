@@ -197,6 +197,55 @@ impl NetworkBehaviour for MessagingBehaviour {
                             "📁 File offered by {}: {} ({} bytes)",
                             peer_id, metadata.name, metadata.size
                         );
+
+                        // Auto-start download
+                        let file_id = metadata.file_id.clone();
+                        let output_path = self
+                            .file_manager
+                            .storage_path
+                            .join("downloads")
+                            .join(&metadata.name);
+
+                        match self
+                            .file_manager
+                            .request_file(metadata.clone(), output_path, peer_id)
+                        {
+                            Ok(_) => {
+                                info!("🔽 Auto-downloading: {}", metadata.name);
+
+                                // Request first batch of chunks
+                                let chunks_to_request =
+                                    self.file_manager.get_next_chunks_to_request(&file_id, 5);
+
+                                if !chunks_to_request.is_empty() {
+                                    let dummy_pubkey =
+                                        ed25519_dalek::VerifyingKey::from_bytes(&[0u8; 32])
+                                            .unwrap();
+
+                                    for chunk_index in chunks_to_request {
+                                        let chunk_request_msg = Message {
+                                            msg_type: MessageType::ChunkRequest {
+                                                file_id: file_id.clone(),
+                                                chunk_index,
+                                            },
+                                            from: NodeId::from_pubkey(&dummy_pubkey),
+                                            to: None,
+                                            timestamp: std::time::SystemTime::now()
+                                                .duration_since(std::time::UNIX_EPOCH)
+                                                .unwrap()
+                                                .as_secs(),
+                                            signature: vec![],
+                                        };
+                                        self.send_message(peer_id, chunk_request_msg);
+                                        info!("📦 Requesting chunk {} of {}", chunk_index, file_id);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                warn!("❌ Failed to start auto-download: {}", e);
+                            }
+                        }
+
                         self.pending_events
                             .push_back(MessagingBehaviourEvent::FileOffered {
                                 peer: peer_id,
