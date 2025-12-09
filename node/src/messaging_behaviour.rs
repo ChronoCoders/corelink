@@ -106,55 +106,6 @@ impl MessagingBehaviour {
 
         Ok(metadata)
     }
-
-    /// Request a file from a specific peer
-    pub fn request_file_from_peer(&mut self, peer: PeerId, metadata: FileMetadata) -> io::Result<()> {
-        info!(
-            "📥 Requesting file {} from peer {}",
-            metadata.name, peer
-        );
-
-        let download_path = PathBuf::from("./storage/downloads").join(&metadata.name);
-        let file_id = self.file_manager.request_file(metadata.clone(), download_path, peer)?;
-
-        // Send file request message
-        let dummy_pubkey = ed25519_dalek::VerifyingKey::from_bytes(&[0u8; 32]).unwrap();
-        let request_msg = Message {
-            msg_type: MessageType::FileRequest {
-                file_id: file_id.clone(),
-                requester: NodeId::from_pubkey(&dummy_pubkey),
-            },
-            from: NodeId::from_pubkey(&dummy_pubkey),
-            to: None,
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-            signature: vec![],
-        };
-        self.send_message(peer, request_msg);
-
-        // Request first batch of chunks
-        let chunks_to_request = self.file_manager.get_next_chunks_to_request(&file_id, 5);
-        for chunk_index in chunks_to_request {
-            let chunk_request_msg = Message {
-                msg_type: MessageType::ChunkRequest {
-                    file_id: file_id.clone(),
-                    chunk_index,
-                },
-                from: NodeId::from_pubkey(&dummy_pubkey),
-                to: None,
-                timestamp: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs(),
-                signature: vec![],
-            };
-            self.send_message(peer, chunk_request_msg);
-        }
-
-        Ok(())
-    }
 }
 
 impl NetworkBehaviour for MessagingBehaviour {
@@ -269,7 +220,7 @@ impl NetworkBehaviour for MessagingBehaviour {
                         // Handle received chunk
                         let file_id = chunk.file_id.clone();
                         match self.file_manager.handle_chunk_received(chunk.clone()) {
-                            Ok(TransferStatus::ChunkReceived { progress, .. }) => {
+                            Ok(TransferStatus::ChunkReceived { progress }) => {
                                 info!(
                                     "📦 Chunk received for {}: {:.1}%",
                                     file_id,
@@ -306,7 +257,7 @@ impl NetworkBehaviour for MessagingBehaviour {
                                     }
                                 }
                             }
-                            Ok(TransferStatus::TransferComplete { file_id }) => {
+                            Ok(TransferStatus::TransferComplete) => {
                                 info!("✅ Transfer complete: {}", file_id);
                                 self.pending_events
                                     .push_back(MessagingBehaviourEvent::TransferComplete {
@@ -331,10 +282,7 @@ impl NetworkBehaviour for MessagingBehaviour {
                                 };
                                 self.send_message(peer_id, complete_msg);
                             }
-                            Ok(TransferStatus::VerificationFailed {
-                                file_id,
-                                chunk_index,
-                            }) => {
+                            Ok(TransferStatus::VerificationFailed { chunk_index }) => {
                                 error!(
                                     "❌ Chunk verification failed: {} chunk {}",
                                     file_id, chunk_index
@@ -350,7 +298,7 @@ impl NetworkBehaviour for MessagingBehaviour {
                                     ed25519_dalek::VerifyingKey::from_bytes(&[0u8; 32]).unwrap();
                                 let cancel_msg = Message {
                                     msg_type: MessageType::TransferCancel {
-                                        file_id,
+                                        file_id: file_id.clone(),
                                         reason: format!("Chunk {} verification failed", chunk_index),
                                     },
                                     from: NodeId::from_pubkey(&dummy_pubkey),

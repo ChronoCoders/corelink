@@ -1,7 +1,6 @@
 use corelink_core::file::{
     split_file_to_chunks, verify_chunk, write_chunk_to_file, FileChunk, FileMetadata, FileTransfer,
 };
-use libp2p_identity::PeerId;
 use lru::LruCache;
 use std::collections::HashMap;
 use std::fs;
@@ -13,15 +12,10 @@ use tracing::{debug, error, info, warn};
 #[derive(Debug, Clone)]
 pub enum TransferStatus {
     ChunkReceived {
-        file_id: String,
-        chunk_index: u32,
         progress: f32,
     },
-    TransferComplete {
-        file_id: String,
-    },
+    TransferComplete,
     VerificationFailed {
-        file_id: String,
         chunk_index: u32,
     },
 }
@@ -96,55 +90,6 @@ impl FileTransferManager {
         self.active_uploads.insert(file_id, metadata.clone());
 
         Ok(metadata)
-    }
-
-    /// Request a file for download
-    pub fn request_file(
-        &mut self,
-        metadata: FileMetadata,
-        _output_path: PathBuf,
-        peer: PeerId,
-    ) -> io::Result<String> {
-        let file_id = metadata.file_id.clone();
-
-        // Check if already downloading
-        if self.active_downloads.contains_key(&file_id) {
-            return Err(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                format!("Already downloading file: {}", file_id),
-            ));
-        }
-
-        info!(
-            "📥 Requesting file: {} from peer {}",
-            metadata.name, peer
-        );
-
-        // Create download directory path
-        let download_path = self
-            .storage_path
-            .join("downloads")
-            .join(&metadata.name);
-
-        // Create FileTransfer to track progress
-        let mut transfer = FileTransfer::new(metadata.clone(), download_path.clone());
-        transfer.add_peer(peer);
-
-        // Pre-allocate file with correct size
-        if let Err(e) = fs::File::create(&download_path)
-            .and_then(|f| f.set_len(metadata.size))
-        {
-            warn!("Failed to pre-allocate download file: {}", e);
-        }
-
-        info!(
-            "📊 Download initialized: {} chunks to download",
-            transfer.missing_chunks.len()
-        );
-
-        self.active_downloads.insert(file_id.clone(), transfer);
-
-        Ok(file_id)
     }
 
     /// Handle a chunk request and return the chunk if available
@@ -232,10 +177,7 @@ impl FileTransferManager {
                 "❌ Chunk verification failed: {} index {}",
                 file_id, chunk_index
             );
-            return Ok(TransferStatus::VerificationFailed {
-                file_id,
-                chunk_index,
-            });
+            return Ok(TransferStatus::VerificationFailed { chunk_index });
         }
 
         // Write chunk to file
@@ -271,14 +213,10 @@ impl FileTransferManager {
             // Remove from active downloads
             self.active_downloads.remove(&file_id);
 
-            return Ok(TransferStatus::TransferComplete { file_id });
+            return Ok(TransferStatus::TransferComplete);
         }
 
-        Ok(TransferStatus::ChunkReceived {
-            file_id,
-            chunk_index,
-            progress,
-        })
+        Ok(TransferStatus::ChunkReceived { progress })
     }
 
     /// Get the next batch of chunks to request for a file
@@ -292,73 +230,6 @@ impl FileTransferManager {
                 .collect()
         } else {
             Vec::new()
-        }
-    }
-
-    /// Check if a transfer is complete
-    pub fn is_transfer_complete(&self, file_id: &str) -> bool {
-        if let Some(transfer) = self.active_downloads.get(file_id) {
-            transfer.is_complete()
-        } else {
-            false
-        }
-    }
-
-    /// Get transfer progress (0.0 to 1.0)
-    pub fn get_transfer_progress(&self, file_id: &str) -> Option<f32> {
-        self.active_downloads.get(file_id).map(|t| t.progress)
-    }
-
-    /// Get active downloads count
-    pub fn active_downloads_count(&self) -> usize {
-        self.active_downloads.len()
-    }
-
-    /// Get active uploads count
-    pub fn active_uploads_count(&self) -> usize {
-        self.active_uploads.len()
-    }
-
-    /// Get list of active upload file IDs
-    pub fn get_active_uploads(&self) -> Vec<String> {
-        self.active_uploads.keys().cloned().collect()
-    }
-
-    /// Get list of active download file IDs
-    pub fn get_active_downloads(&self) -> Vec<String> {
-        self.active_downloads.keys().cloned().collect()
-    }
-
-    /// Add a peer to an active download
-    pub fn add_peer_to_download(&mut self, file_id: &str, peer: PeerId) {
-        if let Some(transfer) = self.active_downloads.get_mut(file_id) {
-            transfer.add_peer(peer);
-            info!("🔗 Added peer {} to download {}", peer, file_id);
-        }
-    }
-
-    /// Get metadata for an offered file
-    pub fn get_upload_metadata(&self, file_id: &str) -> Option<&FileMetadata> {
-        self.active_uploads.get(file_id)
-    }
-
-    /// Cancel a download
-    pub fn cancel_download(&mut self, file_id: &str) -> io::Result<()> {
-        if let Some(transfer) = self.active_downloads.remove(file_id) {
-            info!("🚫 Cancelled download: {}", file_id);
-
-            // Optionally delete partial file
-            if transfer.output_path.exists() {
-                fs::remove_file(&transfer.output_path)?;
-                debug!("Deleted partial download file: {:?}", transfer.output_path);
-            }
-
-            Ok(())
-        } else {
-            Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("No active download: {}", file_id),
-            ))
         }
     }
 }
