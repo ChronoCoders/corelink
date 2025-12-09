@@ -347,8 +347,9 @@ mod tests {
 
     #[test]
     fn test_file_transfer_progress() {
+        let temp_file = NamedTempFile::new().unwrap();
         let metadata = FileMetadata::new("test.txt".to_string(), 1000, vec![[0u8; 32]; 10]);
-        let mut transfer = FileTransfer::new(metadata, PathBuf::from("/tmp/test.txt"));
+        let mut transfer = FileTransfer::new(metadata, temp_file.path().to_path_buf());
 
         assert_eq!(transfer.progress, 0.0);
         assert!(!transfer.is_complete());
