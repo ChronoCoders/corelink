@@ -189,7 +189,6 @@ impl NetworkBehaviour for MessagingBehaviour {
         match event {
             CoreLinkHandlerEvent::MessageReceived(msg) => {
                 info!("📨 Received message from {}: {:?}", peer_id, msg.msg_type);
-<<<<<<< HEAD
 
                 // Handle file transfer messages
                 match &msg.msg_type {
@@ -360,13 +359,6 @@ impl NetworkBehaviour for MessagingBehaviour {
                             });
                     }
                 }
-=======
-                self.pending_events
-                    .push_back(MessagingBehaviourEvent::MessageReceived {
-                        from: peer_id,
-                        message: msg,
-                    });
->>>>>>> 3624ad4 (Merge port parsing fix and protocol handler improvements)
             }
             CoreLinkHandlerEvent::MessageSent => {
                 info!("✅ Message sent to {}", peer_id);
