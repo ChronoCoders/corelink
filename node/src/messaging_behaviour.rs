@@ -1,8 +1,8 @@
 use crate::file_transfer::{FileTransferManager, TransferStatus};
 use crate::protocol_handler::{CoreLinkHandler, CoreLinkHandlerEvent};
 use corelink_core::file::FileMetadata;
-use corelink_core::message::{DiscoveryMessage, Message, MessageType};
 use corelink_core::identity::NodeId;
+use corelink_core::message::{DiscoveryMessage, Message, MessageType};
 use libp2p_core::{Endpoint, Multiaddr};
 use libp2p_identity::PeerId;
 use libp2p_swarm::{
@@ -17,14 +17,33 @@ use tracing::{error, info, warn};
 
 #[derive(Debug)]
 pub enum MessagingBehaviourEvent {
-    MessageReceived { from: PeerId, message: Message },
-    MessageSent { to: PeerId },
-    SendError { to: PeerId, error: String },
+    MessageReceived {
+        from: PeerId,
+        message: Message,
+    },
+    MessageSent {
+        to: PeerId,
+    },
+    SendError {
+        to: PeerId,
+        error: String,
+    },
     // File transfer events
-    FileOffered { peer: PeerId, metadata: FileMetadata },
-    ChunkReceived { file_id: String, progress: f32 },
-    TransferComplete { file_id: String },
-    TransferFailed { file_id: String, reason: String },
+    FileOffered {
+        peer: PeerId,
+        metadata: FileMetadata,
+    },
+    ChunkReceived {
+        file_id: String,
+        progress: f32,
+    },
+    TransferComplete {
+        file_id: String,
+    },
+    TransferFailed {
+        file_id: String,
+        reason: String,
+    },
 }
 
 pub struct MessagingBehaviour {
@@ -108,14 +127,17 @@ impl MessagingBehaviour {
     }
 
     /// Request a file from a specific peer
-    pub fn request_file_from_peer(&mut self, peer: PeerId, metadata: FileMetadata) -> io::Result<()> {
-        info!(
-            "📥 Requesting file {} from peer {}",
-            metadata.name, peer
-        );
+    pub fn request_file_from_peer(
+        &mut self,
+        peer: PeerId,
+        metadata: FileMetadata,
+    ) -> io::Result<()> {
+        info!("📥 Requesting file {} from peer {}", metadata.name, peer);
 
         let download_path = PathBuf::from("./storage/downloads").join(&metadata.name);
-        let file_id = self.file_manager.request_file(metadata.clone(), download_path, peer)?;
+        let file_id = self
+            .file_manager
+            .request_file(metadata.clone(), download_path, peer)?;
 
         // Send file request message
         let dummy_pubkey = ed25519_dalek::VerifyingKey::from_bytes(&[0u8; 32]).unwrap();
@@ -233,9 +255,15 @@ impl NetworkBehaviour for MessagingBehaviour {
                                 metadata: metadata.clone(),
                             });
                     }
-                    MessageType::ChunkRequest { file_id, chunk_index } => {
+                    MessageType::ChunkRequest {
+                        file_id,
+                        chunk_index,
+                    } => {
                         // Handle chunk request - serve the chunk
-                        match self.file_manager.handle_chunk_request(file_id, *chunk_index) {
+                        match self
+                            .file_manager
+                            .handle_chunk_request(file_id, *chunk_index)
+                        {
                             Ok(Some(chunk)) => {
                                 let dummy_pubkey =
                                     ed25519_dalek::VerifyingKey::from_bytes(&[0u8; 32]).unwrap();
@@ -252,16 +280,10 @@ impl NetworkBehaviour for MessagingBehaviour {
                                 self.send_message(peer_id, chunk_msg);
                             }
                             Ok(None) => {
-                                warn!(
-                                    "Chunk {} not found for file {}",
-                                    chunk_index, file_id
-                                );
+                                warn!("Chunk {} not found for file {}", chunk_index, file_id);
                             }
                             Err(e) => {
-                                error!(
-                                    "Failed to handle chunk request for {}: {}",
-                                    file_id, e
-                                );
+                                error!("Failed to handle chunk request for {}: {}", file_id, e);
                             }
                         }
                     }
@@ -275,11 +297,12 @@ impl NetworkBehaviour for MessagingBehaviour {
                                     file_id,
                                     progress * 100.0
                                 );
-                                self.pending_events
-                                    .push_back(MessagingBehaviourEvent::ChunkReceived {
+                                self.pending_events.push_back(
+                                    MessagingBehaviourEvent::ChunkReceived {
                                         file_id: file_id.clone(),
                                         progress,
-                                    });
+                                    },
+                                );
 
                                 // Request next batch of chunks
                                 let chunks_to_request =
@@ -308,10 +331,11 @@ impl NetworkBehaviour for MessagingBehaviour {
                             }
                             Ok(TransferStatus::TransferComplete { file_id }) => {
                                 info!("✅ Transfer complete: {}", file_id);
-                                self.pending_events
-                                    .push_back(MessagingBehaviourEvent::TransferComplete {
+                                self.pending_events.push_back(
+                                    MessagingBehaviourEvent::TransferComplete {
                                         file_id: file_id.clone(),
-                                    });
+                                    },
+                                );
 
                                 // Send completion acknowledgment
                                 let dummy_pubkey =
@@ -339,11 +363,15 @@ impl NetworkBehaviour for MessagingBehaviour {
                                     "❌ Chunk verification failed: {} chunk {}",
                                     file_id, chunk_index
                                 );
-                                self.pending_events
-                                    .push_back(MessagingBehaviourEvent::TransferFailed {
+                                self.pending_events.push_back(
+                                    MessagingBehaviourEvent::TransferFailed {
                                         file_id: file_id.clone(),
-                                        reason: format!("Chunk {} verification failed", chunk_index),
-                                    });
+                                        reason: format!(
+                                            "Chunk {} verification failed",
+                                            chunk_index
+                                        ),
+                                    },
+                                );
 
                                 // Send cancellation message
                                 let dummy_pubkey =
@@ -351,7 +379,10 @@ impl NetworkBehaviour for MessagingBehaviour {
                                 let cancel_msg = Message {
                                     msg_type: MessageType::TransferCancel {
                                         file_id,
-                                        reason: format!("Chunk {} verification failed", chunk_index),
+                                        reason: format!(
+                                            "Chunk {} verification failed",
+                                            chunk_index
+                                        ),
                                     },
                                     from: NodeId::from_pubkey(&dummy_pubkey),
                                     to: None,
@@ -365,11 +396,12 @@ impl NetworkBehaviour for MessagingBehaviour {
                             }
                             Err(e) => {
                                 error!("Failed to handle chunk: {}", e);
-                                self.pending_events
-                                    .push_back(MessagingBehaviourEvent::TransferFailed {
+                                self.pending_events.push_back(
+                                    MessagingBehaviourEvent::TransferFailed {
                                         file_id,
                                         reason: e.to_string(),
-                                    });
+                                    },
+                                );
                             }
                         }
                     }
@@ -385,16 +417,13 @@ impl NetworkBehaviour for MessagingBehaviour {
             }
             CoreLinkHandlerEvent::MessageSent => {
                 info!("✅ Message sent to {}", peer_id);
-                self.pending_events.push_back(MessagingBehaviourEvent::MessageSent {
-                    to: peer_id,
-                });
+                self.pending_events
+                    .push_back(MessagingBehaviourEvent::MessageSent { to: peer_id });
             }
             CoreLinkHandlerEvent::SendError(error) => {
                 info!("❌ Failed to send message to {}: {}", peer_id, error);
-                self.pending_events.push_back(MessagingBehaviourEvent::SendError {
-                    to: peer_id,
-                    error,
-                });
+                self.pending_events
+                    .push_back(MessagingBehaviourEvent::SendError { to: peer_id, error });
             }
         }
     }

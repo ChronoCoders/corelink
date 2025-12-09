@@ -115,25 +115,17 @@ impl FileTransferManager {
             ));
         }
 
-        info!(
-            "📥 Requesting file: {} from peer {}",
-            metadata.name, peer
-        );
+        info!("📥 Requesting file: {} from peer {}", metadata.name, peer);
 
         // Create download directory path
-        let download_path = self
-            .storage_path
-            .join("downloads")
-            .join(&metadata.name);
+        let download_path = self.storage_path.join("downloads").join(&metadata.name);
 
         // Create FileTransfer to track progress
         let mut transfer = FileTransfer::new(metadata.clone(), download_path.clone());
         transfer.add_peer(peer);
 
         // Pre-allocate file with correct size
-        if let Err(e) = fs::File::create(&download_path)
-            .and_then(|f| f.set_len(metadata.size))
-        {
+        if let Err(e) = fs::File::create(&download_path).and_then(|f| f.set_len(metadata.size)) {
             warn!("Failed to pre-allocate download file: {}", e);
         }
 
