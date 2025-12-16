@@ -81,9 +81,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     info!("👂 Listening on {}", listen_addr);
 
-    // Start WebSocket server
-    let ws_addr = "127.0.0.1:8080";
-    let ws_tx = start_websocket_server(ws_addr)
+    // Start WebSocket server (derive port from node port: 4001 -> 8001, 4002 -> 8002, etc.)
+    let ws_port = port + 4000;
+    let ws_addr = format!("127.0.0.1:{}", ws_port);
+    let ws_tx = start_websocket_server(&ws_addr)
         .await
         .expect("Failed to start WebSocket server");
     info!("🌐 WebSocket server ready at ws://{}", ws_addr);
